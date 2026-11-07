@@ -23,7 +23,7 @@ Closes #
 
 | Проверка | Команда | Результат | Прогон |
 | --- | --- | --- | --- |
-| Все проверки (contract:check → lint → typecheck → test → rule-guard → e2e) | `mise run check` | | <!-- ссылка на CI --> |
+| Все проверки (contract:check → check:workflows → lint → typecheck → test → rule-guard → e2e) | `mise run check` | | <!-- ссылка на CI --> |
 | Браузерная проверка head SHA | задание `browser-check` в CI | | <!-- ссылка на артефакт browser-check-<SHA> --> |
 
 <!-- Какие сценарии спецификации (основной, негативный, соседний) покрыты какими тестами; как показан отказ теста
