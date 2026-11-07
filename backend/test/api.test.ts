@@ -489,6 +489,18 @@ describe('HTTP API', () => {
       ])
     })
 
+    it('includes the event type meeting link for linked bookings and omits it otherwise', async () => {
+      expect((await book(app, 'code-review', '2026-11-09T06:00:00Z', 'Со ссылкой')).statusCode).toBe(201)
+      expect((await book(app, 'consultation', '2026-11-09T08:00:00Z', 'Без ссылки')).statusCode).toBe(201)
+
+      const upcoming = await listUpcoming()
+
+      expect(upcoming.find((booking) => booking.guestName === 'Со ссылкой')).toMatchObject({
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+      })
+      expect(upcoming.find((booking) => booking.guestName === 'Без ссылки')).not.toHaveProperty('meetingUrl')
+    })
+
     it('keeps a meeting until it ends and drops it afterwards', async () => {
       expect((await book(app, 'tech-interview', '2026-11-09T06:00:00Z', 'Идёт сейчас')).statusCode).toBe(201)
       expect((await book(app, 'consultation', '2026-11-09T08:00:00Z', 'Позже')).statusCode).toBe(201)
