@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { EventType } from '@/api/client'
-import { eventType, respond, wasRequested } from '@/test/api'
+import { eventType, requestBody, respond, wasRequested } from '@/test/api'
 import { renderApp } from '@/test/render'
 
 const created: EventType = {
@@ -43,6 +43,7 @@ describe('Диалог создания типа встречи', () => {
 
     expect(await screen.findByText('Тип встречи «Менторская сессия» создан')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(requestBody('POST', '/api/admin/event-types')).not.toHaveProperty('meetingUrl')
     await userEvent.click(screen.getByRole('tab', { name: /Типы встреч/ }))
     const cards = await screen.findAllByTestId('admin-event-type')
     expect(cards.map((card) => card.textContent)).toEqual([
@@ -71,6 +72,7 @@ describe('Диалог создания типа встречи', () => {
 
     expect(await screen.findByText('Тип встречи «Звонок со ссылкой» создан')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(requestBody('POST', '/api/admin/event-types')).toMatchObject({ meetingUrl: linked.meetingUrl })
   })
 
   it.each([

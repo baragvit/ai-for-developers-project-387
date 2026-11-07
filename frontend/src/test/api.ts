@@ -1,15 +1,17 @@
 import type { EventType, Owner } from '@/api/client'
 
 type Route = { method: string; path: string; status: number; body: unknown }
+type Handled = { method: string; path: string; body: unknown }
 
 let routes: Route[] = []
-let handled: string[] = []
+let handled: Handled[] = []
 
 export function installFetchMock() {
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init)
     const { pathname } = new URL(request.url)
-    handled.push(`${request.method} ${pathname}`)
+    const text = await request.text()
+    handled.push({ method: request.method, path: pathname, body: text ? JSON.parse(text) : undefined })
     const route = routes.find((candidate) => candidate.method === request.method && candidate.path === pathname)
     if (!route) {
       return Response.json({ code: 'NOT_FOUND', message: `Unexpected ${request.method} ${pathname}` }, { status: 404 })
@@ -24,7 +26,12 @@ export function resetApi() {
 }
 
 export function wasRequested(method: string, path: string): boolean {
-  return handled.includes(`${method} ${path}`)
+  return handled.some((call) => call.method === method && call.path === path)
+}
+
+/** The body of the last request to the method and path, or `undefined` if none was sent. */
+export function requestBody(method: string, path: string): unknown {
+  return handled.findLast((call) => call.method === method && call.path === path)?.body
 }
 
 /** A later call for the same method and path replaces the earlier answer. */
