@@ -201,7 +201,7 @@ jobs:
           // The training scenario is generated in the runner and is never an application defect.
           if (training) {
             findings.push({
-              key: 'training lighthouse-audit',
+              key: 'training /',
               auditId: 'training',
               path: '/',
               url: 'https://example.invalid/lighthouse-training',
@@ -314,14 +314,19 @@ jobs:
           name: ${{ needs.audit.outputs.artifact }}
           path: /tmp/lighthouse
 
+      # Without page data and without findings (the training one included) the model has nothing to analyse.
       - name: Check the report
         id: report
         run: |
-          if [ -f /tmp/lighthouse/summary.json ]; then
+          if [ ! -f /tmp/lighthouse/summary.json ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Lighthouse report is missing; the agent will report no data."
+          elif jq -e '(.findings | length > 0) or any(.pages[]; .available)' /tmp/lighthouse/summary.json >/dev/null; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Lighthouse report is missing; the agent will report no data."
+            echo "nodata=$(jq -r '[.missingData[] | "\(.path): \(.reason)"] | join("; ")' /tmp/lighthouse/summary.json)" >> "$GITHUB_OUTPUT"
+            echo "::warning::No page data and no findings; the model is not called."
           fi
 
       # The labels the agent searches and applies. issues: write also allows creating labels.
@@ -393,12 +398,15 @@ jobs:
         env:
           AGENT_OUTCOME: ${{ steps.agent.outcome }}
           REPORT_READY: ${{ steps.report.outputs.ready }}
+          NO_DATA: ${{ steps.report.outputs.nodata }}
         run: |
           {
             echo "### Аудит Lighthouse: вывод агента"
             echo
             if [ -s /tmp/lighthouse-audit-agent-summary.md ]; then
               cat /tmp/lighthouse-audit-agent-summary.md
+            elif [ -n "$NO_DATA" ]; then
+              echo "Нет данных, модель не вызывалась: $NO_DATA. Это не находка и не подтверждение исправления."
             elif [ "$REPORT_READY" != "true" ]; then
               echo "Нет данных: артефакт с отчётом Lighthouse не найден. Находок и исправлений нет."
             elif [ "$AGENT_OUTCOME" = "success" ]; then
