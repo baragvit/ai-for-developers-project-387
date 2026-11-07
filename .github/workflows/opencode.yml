@@ -22,7 +22,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      issues: read
+      issues: write
       pull-requests: read
     steps:
       # On a fork PR the agent would check out and could run the fork's code with the model key.
@@ -55,7 +55,8 @@ jobs:
         uses: anomalyco/opencode/github@810c0eba1a7348036f8bdf61e6632d0c36c6876c # v1.19.5
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          # Read-only token for `gh` in the skills (docs/agents/issue-tracker.md); comments and pushes use the app token.
+          # Token for `gh` in the skills (docs/agents/issue-tracker.md): reads the repo, writes issues, labels and their
+          # links. Comments and pushes use the app token.
           GH_TOKEN: ${{ github.token }}
         with:
           model: opencode/deepseek-v4.1-flash-free
