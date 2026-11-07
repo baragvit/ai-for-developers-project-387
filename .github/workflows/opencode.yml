@@ -158,7 +158,7 @@ jobs:
           # Token for `gh` in the skills (docs/agents/issue-tracker.md): reads the repo, writes issues, labels and their
           # links. Comments and pushes use the app token.
           GH_TOKEN: ${{ github.token }}
-          MODEL: opencode/kimi-k2.7-code
+          MODEL: opencode/deepseek-v4.1-flash
           # Below the job's timeout-minutes, so the reason is recorded before the runner stops the job.
           AGENT_TIMEOUT: 55m
         run: |

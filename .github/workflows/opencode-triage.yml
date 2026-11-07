@@ -37,7 +37,7 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         with:
-          model: opencode/kimi-k2.7-code
+          model: opencode/deepseek-v4.1-flash
           share: false
           prompt: |
             Triage the newly opened issue #${{ github.event.issue.number }} in this repository.
