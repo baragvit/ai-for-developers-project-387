@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/baragvit/ai-for-developers-project-387/compare/v0.2.0...v0.3.0) (2026-11-07)
+
+
+### Features
+
+* show meeting URL to guests and the owner ([#18](https://github.com/baragvit/ai-for-developers-project-387/issues/18)) ([eb8bdd7](https://github.com/baragvit/ai-for-developers-project-387/commit/eb8bdd7a3850ebb4a709e041183ce07e7b5e6a28))
+
+
+### Bug Fixes
+
+* **ci:** keep queued /oc requests from being cancelled by bot comments ([#20](https://github.com/baragvit/ai-for-developers-project-387/issues/20)) ([647f2ec](https://github.com/baragvit/ai-for-developers-project-387/commit/647f2ec8c39bf656aea702de2939940918f6cd21))
+
 ## [0.2.0](https://github.com/baragvit/ai-for-developers-project-386/compare/v0.1.0...v0.2.0) (2026-11-06)
 
 
