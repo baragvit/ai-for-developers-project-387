@@ -1,0 +1,434 @@
+name: lighthouse-audit
+# The opencode-agent GitHub App has no `workflows` permission: the agent cannot push changes to this file.
+
+on:
+  schedule:
+    # Daily, 03:17 Europe/Moscow. Not more often than once a day.
+    - cron: "17 3 * * *"
+      timezone: Europe/Moscow
+  workflow_dispatch:
+    inputs:
+      training:
+        description: "Добавить учебную находку в отчёт (не дефект приложения)"
+        type: boolean
+        default: false
+
+# One group for every audit; an in-flight audit is never cancelled.
+concurrency:
+  group: lighthouse-audit
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  APP_URL: ${{ vars.APP_URL }}
+  AUDIT_SHA: ${{ github.sha }}
+  AUDIT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+  AUDIT_PATHS: "/ /book/consultation"
+  AUDIT_TRAINING: ${{ github.event.inputs.training || 'false' }}
+
+jobs:
+  audit:
+    name: Lighthouse report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      available: ${{ steps.wake.outputs.available }}
+      artifact: ${{ steps.meta.outputs.artifact }}
+      stamp: ${{ steps.meta.outputs.stamp }}
+    steps:
+      - name: Prepare report directory
+        id: meta
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y%m%dT%H%M%SZ)
+          dir="$RUNNER_TEMP/lighthouse"
+          mkdir -p "$dir"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "stamp=$stamp" >> "$GITHUB_OUTPUT"
+          echo "artifact=lighthouse-audit-$AUDIT_SHA-$stamp" >> "$GITHUB_OUTPUT"
+
+      # Free Render sleeps after ~15 minutes. Poll /api/owner for about two minutes before auditing.
+      - name: Wake the app
+        id: wake
+        run: |
+          set -uo pipefail
+          if [ -z "${APP_URL:-}" ]; then
+            echo "::warning::vars.APP_URL is not set: no data."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "reason=vars.APP_URL is not set" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${APP_URL%/}"
+          health="$base/api/owner"
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 10 "$health" >/dev/null; then
+              echo "available=true" >> "$GITHUB_OUTPUT"
+              echo "reason=ok" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "wake attempt $i failed"
+            sleep 2
+          done
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "reason=$APP_URL did not respond within about 2 minutes" >> "$GITHUB_OUTPUT"
+          echo "::warning::$APP_URL did not respond within about 2 minutes: no data."
+
+      - name: Run Lighthouse
+        id: lighthouse
+        if: steps.wake.outputs.available == 'true'
+        continue-on-error: true
+        env:
+          REPORT_DIR: ${{ steps.meta.outputs.dir }}
+        run: |
+          set -uo pipefail
+          base="${APP_URL%/}"
+          for path in $AUDIT_PATHS; do
+            slug="${path#/}"
+            slug="${slug//\//-}"
+            [ -n "$slug" ] || slug="home"
+            echo "Lighthouse: $base$path -> $REPORT_DIR/$slug.report.{json,html}"
+            npx --yes lighthouse@12.8.2 "$base$path" \
+              --output=json --output=html \
+              --output-path="$REPORT_DIR/$slug" \
+              --only-categories=performance \
+              --chrome-flags="--headless=new --no-sandbox --disable-dev-shm-usage --disable-gpu" \
+              --quiet || echo "::warning::Lighthouse failed for $path"
+          done
+
+      - name: Summarize the report
+        if: ${{ !cancelled() }}
+        env:
+          REPORT_DIR: ${{ steps.meta.outputs.dir }}
+          STAMP: ${{ steps.meta.outputs.stamp }}
+          ARTIFACT: ${{ steps.meta.outputs.artifact }}
+          AVAILABLE: ${{ steps.wake.outputs.available }}
+          REASON: ${{ steps.wake.outputs.reason }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+
+          const dir = process.env.REPORT_DIR
+          const stamp = process.env.STAMP
+          const artifact = process.env.ARTIFACT
+          const sha = process.env.AUDIT_SHA
+          const runUrl = process.env.AUDIT_RUN_URL
+          const appUrl = (process.env.APP_URL || '').replace(/\/$/, '')
+          const available = process.env.AVAILABLE === 'true'
+          const reason = process.env.REASON || ''
+          const training = process.env.AUDIT_TRAINING === 'true'
+          const paths = (process.env.AUDIT_PATHS || '').trim().split(/\s+/).filter(Boolean)
+
+          const slug = (pagePath) => pagePath === '/' ? 'home' : pagePath.replace(/^\//, '').replace(/\//g, '-')
+          const round = (value) => Math.round(Number(value))
+
+          const pages = []
+          const findings = []
+          const missingData = []
+
+          for (const pagePath of paths) {
+            const pageSlug = slug(pagePath)
+            const jsonPath = path.join(dir, `${pageSlug}.report.json`)
+            const htmlPath = path.join(dir, `${pageSlug}.report.html`)
+            const pageUrl = `${appUrl}${pagePath}`
+
+            if (!available) {
+              pages.push({ path: pagePath, url: pageUrl, available: false, reason })
+              missingData.push({ path: pagePath, reason })
+              continue
+            }
+
+            let report
+            try {
+              report = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
+            } catch {
+              const why = 'Lighthouse report not found or invalid'
+              pages.push({ path: pagePath, url: pageUrl, available: false, reason: why })
+              missingData.push({ path: pagePath, reason: why })
+              continue
+            }
+
+            // A page that failed to load (e.g. 503 while Render wakes up) still yields a JSON with null scores.
+            if (report.runtimeError || report.categories?.performance?.score == null) {
+              const why = report.runtimeError
+                ? `Lighthouse runtime error ${report.runtimeError.code}: ${report.runtimeError.message}`
+                : 'Lighthouse returned no performance score'
+              pages.push({ path: pagePath, url: pageUrl, available: false, reason: why })
+              missingData.push({ path: pagePath, reason: why })
+              continue
+            }
+
+            const performance = report.categories?.performance?.score != null
+              ? round(report.categories.performance.score * 100)
+              : null
+            const lcpMs = report.audits?.['largest-contentful-paint']?.numericValue
+            const cls = report.audits?.['cumulative-layout-shift']?.numericValue
+            const tbtMs = report.audits?.['total-blocking-time']?.numericValue
+
+            const page = {
+              path: pagePath,
+              url: pageUrl,
+              available: true,
+              performance,
+              lcpMs: Number.isFinite(lcpMs) ? round(lcpMs) : null,
+              cls: Number.isFinite(cls) ? Number(cls.toFixed(3)) : null,
+              tbtMs: Number.isFinite(tbtMs) ? round(tbtMs) : null,
+              lighthouseJson: path.basename(jsonPath),
+              lighthouseHtml: fs.existsSync(htmlPath) ? path.basename(htmlPath) : null,
+            }
+            pages.push(page)
+
+            const problems = []
+            if (page.performance != null && page.performance < 90) problems.push(`Performance ${page.performance} < 90`)
+            if (page.lcpMs != null && page.lcpMs > 2500) problems.push(`LCP ${page.lcpMs} мс > 2500 мс`)
+            if (page.cls != null && page.cls > 0.1) problems.push(`CLS ${page.cls} > 0.1`)
+            if (page.tbtMs != null && page.tbtMs > 200) problems.push(`TBT ${page.tbtMs} мс > 200 мс`)
+
+            if (problems.length > 0) {
+              findings.push({
+                key: `lighthouse-performance ${pagePath}`,
+                auditId: 'lighthouse-performance',
+                path: pagePath,
+                url: pageUrl,
+                training: false,
+                problem: `Метрики скорости ниже порога: ${problems.join('; ')}.`,
+                metrics: {
+                  performance: page.performance,
+                  lcpMs: page.lcpMs,
+                  cls: page.cls,
+                  tbtMs: page.tbtMs,
+                },
+                suggestedAction:
+                  'Открыть Lighthouse JSON/HTML в артефакте, найти проблемные аудиты и устранить основную причину: оптимизировать LCP-ресурс, зарезервировать место под динамический контент для CLS и сократить длинные задачи для TBT.',
+              })
+            }
+          }
+
+          // The training scenario is generated in the runner and is never an application defect.
+          if (training) {
+            findings.push({
+              key: 'training /',
+              auditId: 'training',
+              path: '/',
+              url: 'https://example.invalid/lighthouse-training',
+              training: true,
+              problem:
+                'Учебная находка, сгенерированная в раннере для проверки сценария аудита. Это не дефект приложения.',
+              metrics: { performance: null, lcpMs: null, cls: null, tbtMs: null },
+              suggestedAction:
+                'Ничего не исправлять: находка нужна только для проверки заголовка [учебный], метки training и создания issue.',
+            })
+          }
+
+          const summary = {
+            schemaVersion: 1,
+            audit: {
+              sha,
+              stamp,
+              runUrl,
+              artifact,
+              artifactUrl: `${runUrl}#artifacts`,
+              appUrl,
+              paths,
+              available,
+              reason,
+              training,
+            },
+            pages,
+            findings,
+            missingData,
+          }
+          fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify(summary, null, 2) + '\n')
+
+          const lines = []
+          lines.push('### Аудит Lighthouse')
+          lines.push('')
+          lines.push(`- SHA: \`${sha}\``)
+          lines.push(`- Время (UTC): ${stamp}`)
+          lines.push(`- Прогон: ${runUrl}`)
+          lines.push(`- Артефакт: \`${artifact}\` (${runUrl}#artifacts)`)
+          lines.push(`- Адрес: ${appUrl || 'не задан'}`)
+          lines.push(`- Учебный сценарий: ${training ? 'да' : 'нет'}`)
+          lines.push('')
+
+          if (!available) {
+            lines.push(`**Нет данных:** ${reason}. Это не находка и не исправление.`)
+          } else {
+            lines.push('| Страница | Performance | LCP, мс | CLS | TBT, мс |')
+            lines.push('| --- | --- | --- | --- | --- |')
+            for (const page of pages) {
+              if (!page.available) {
+                lines.push(`| \`${page.path}\` | — | — | — | — |`)
+              } else {
+                lines.push(`| \`${page.path}\` | ${page.performance ?? '—'} | ${page.lcpMs ?? '—'} | ${page.cls ?? '—'} | ${page.tbtMs ?? '—'} |`)
+              }
+            }
+            if (missingData.length > 0) {
+              lines.push('')
+              lines.push('Нет данных по страницам: ' + missingData.map((item) => `\`${item.path}\` (${item.reason})`).join(', ') + '.')
+            }
+          }
+
+          if (findings.length > 0) {
+            lines.push('')
+            lines.push(`Находок: ${findings.length}.`)
+            for (const finding of findings) {
+              lines.push(`- ${finding.training ? '[учебный] ' : ''}\`${finding.path}\` — ${finding.problem}`)
+            }
+          }
+
+          const markdown = lines.join('\n') + '\n'
+          fs.writeFileSync(path.join(dir, 'summary.md'), markdown)
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown)
+          }
+          NODE
+
+      - name: Upload the Lighthouse report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact }}
+          path: ${{ steps.meta.outputs.dir }}
+          retention-days: 30
+          if-no-files-found: warn
+          overwrite: true
+
+  agent:
+    name: Lighthouse findings
+    needs: audit
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # actions: read only downloads the report artifact produced by the audit job.
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download the report
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.audit.outputs.artifact }}
+          path: /tmp/lighthouse
+
+      # Without page data and without findings (the training one included) the model has nothing to analyse.
+      - name: Check the report
+        id: report
+        run: |
+          if [ ! -f /tmp/lighthouse/summary.json ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Lighthouse report is missing; the agent will report no data."
+          elif jq -e '(.findings | length > 0) or any(.pages[]; .available)' /tmp/lighthouse/summary.json >/dev/null; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "nodata=$(jq -r '[.missingData[] | "\(.path): \(.reason)"] | join("; ")' /tmp/lighthouse/summary.json)" >> "$GITHUB_OUTPUT"
+            echo "::warning::No page data and no findings; the model is not called."
+          fi
+
+      # The labels the agent searches and applies. issues: write also allows creating labels.
+      - name: Ensure audit labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create performance-audit --repo "$GITHUB_REPOSITORY" --color FBCA04 --description "Regular Lighthouse performance finding" \
+            || gh label edit performance-audit --repo "$GITHUB_REPOSITORY" --color FBCA04 --description "Regular Lighthouse performance finding"
+          gh label create training --repo "$GITHUB_REPOSITORY" --color BFD4F2 --description "Training scenario, not an application defect" \
+            || gh label edit training --repo "$GITHUB_REPOSITORY" --color BFD4F2 --description "Training scenario, not an application defect"
+
+      - name: Run OpenCode
+        id: agent
+        if: steps.report.outputs.ready == 'true'
+        continue-on-error: true
+        uses: anomalyco/opencode/github@810c0eba1a7348036f8bdf61e6632d0c36c6876c # v1.19.5
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          # Minimal rights: the action and the agent's `gh` use GITHUB_TOKEN, never the app token.
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          # Nobody answers a permission prompt on the runner: an "ask" hangs until the timeout.
+          OPENCODE_PERMISSION: '{"external_directory": {"*": "deny", "/tmp/*": "allow"}, "doom_loop": "deny"}'
+        with:
+          model: opencode/deepseek-v4.1-flash
+          share: false
+          use_github_token: true
+          prompt: |
+            Ты — агент регулярного аудита скорости приложения «Запись на звонок» (Lighthouse).
+
+            1. Прочитай отчёт `/tmp/lighthouse/summary.json` и, если нужны детали, Lighthouse JSON/HTML
+               в `/tmp/lighthouse`. В отчёте есть SHA, время, ссылка на прогон, артефакт, метрики страниц
+               и готовые `findings` со стабильными ключами.
+            2. Не меняй код, не создавай ветки, коммиты и pull request. Рабочее дерево должно остаться чистым.
+               Итог пиши только в `/tmp/lighthouse-audit-agent-summary.md`.
+            3. Если `audit.available` = false, не создавай issue по реальным находкам: запиши «нет данных»
+               и причину. Это не находка и не исправление. Учебную находку (`training: true`) создавай
+               и в этом случае: она сгенерирована в раннере, а не получена из приложения.
+            4. Для каждой записи из `findings`:
+               - Стабильный ключ — поле `key`. В тело issue добавь строку `<!-- audit-finding: <key> -->`
+                 без изменений.
+               - Найди открытые и закрытые issue и проверь, есть ли в их теле эта строка:
+                 `gh issue list --repo "$GITHUB_REPOSITORY" --state all --label <метка> --limit 200 --json number,title,state,body`,
+                 где `<метка>` — `performance-audit` для обычной находки или `training` для учебной.
+               - Если issue с тем же ключом уже есть, новую не создавай. Если в отчёте нет существенно
+                 новых сведений (метрики заметно не ухудшились), не создавай и комментарий. Если метрики
+                 заметно ухудшились, добавь комментарий к существующей issue с новыми значениями и ссылкой
+                 на прогон.
+               - Если issue нет, создай её через `gh issue create --repo "$GITHUB_REPOSITORY"`.
+               - Обычная находка: метка `performance-audit`, заголовок вида
+                 `Аудит Lighthouse: <страница> — метрики ниже порога`; без `ready-for-agent`: это входящее
+                 обращение, решение о реализации за человеком.
+               - Учебная находка (`training: true`): заголовок начинается с `[учебный] `, метка `training`;
+                 в теле явно скажи, что это учебный сценарий, а не дефект приложения; метку
+                 `performance-audit` не ставь.
+               - Тело issue: проблема; проверенный адрес и страница (`path` и `url`); значения
+                 Performance, LCP, CLS, TBT; предлагаемое действие (`suggestedAction`); ссылка на прогон
+                 (`audit.runUrl`) и артефакт (`audit.artifact`, `audit.artifactUrl`). Метрики и ссылки
+                 переноси текстом: артефакт временный.
+            5. Если `findings` пуст, ничего не создавай и запиши «находок нет» по страницам с данными.
+               Страницы из `missingData` всегда перечисляй отдельно как «нет данных» с причиной, даже
+               если по другим страницам есть находки: отсутствие данных не означает, что проблем нет.
+            6. В конце запиши в `/tmp/lighthouse-audit-agent-summary.md` короткий итог на русском:
+               сколько issue создано, какие были дублями, что не было находок или данных; обязательно
+               ссылка на прогон. Этот файл workflow добавит в job summary.
+
+      - name: Publish the agent summary
+        if: ${{ !cancelled() }}
+        env:
+          AGENT_OUTCOME: ${{ steps.agent.outcome }}
+          REPORT_READY: ${{ steps.report.outputs.ready }}
+          NO_DATA: ${{ steps.report.outputs.nodata }}
+        run: |
+          {
+            echo "### Аудит Lighthouse: вывод агента"
+            echo
+            if [ -s /tmp/lighthouse-audit-agent-summary.md ]; then
+              cat /tmp/lighthouse-audit-agent-summary.md
+            elif [ -n "$NO_DATA" ]; then
+              echo "Нет данных, модель не вызывалась: $NO_DATA. Это не находка и не подтверждение исправления."
+            elif [ "$REPORT_READY" != "true" ]; then
+              echo "Нет данных: артефакт с отчётом Lighthouse не найден. Находок и исправлений нет."
+            elif [ "$AGENT_OUTCOME" = "success" ]; then
+              echo "Агент не записал отдельный итог; смотрите лог задания."
+            else
+              echo "Агент завершился с ошибкой (\`$AGENT_OUTCOME\`); смотрите лог задания."
+            fi
+            echo
+            echo "Прогон: $AUDIT_RUN_URL"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on agent error
+        if: steps.agent.outcome == 'failure'
+        run: exit 1
