@@ -45,7 +45,7 @@ export const zEventType = z.object({
     name: z.string().min(1).max(100),
     description: z.string().max(500),
     durationMinutes: z.int().gte(5).lte(240),
-    meetingUrl: z.string().max(2048).regex(/^https?:\/\/[^\s\/?#]+[^\s]*$/).optional()
+    meetingUrl: z.string().max(2048).regex(/^https?:\/\/[^\s\/?#:@][^\s\/?#]*(?:[\/?#][^\s]*)?$/).optional()
 });
 
 /**

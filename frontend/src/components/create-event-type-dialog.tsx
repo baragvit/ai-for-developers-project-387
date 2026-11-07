@@ -32,7 +32,7 @@ type Errors = Partial<Record<keyof Values, string>>
 
 const emptyValues: Values = { name: '', id: '', durationMinutes: '30', description: '', meetingUrl: '' }
 
-const MEETING_URL_PATTERN = /^https?:\/\/[^\s/?#]+[^\s]*$/
+const MEETING_URL_PATTERN = /^https?:\/\/[^\s/?#:@][^\s/?#]*(?:[/?#][^\s]*)?$/
 
 function validate(values: Values): Errors {
   const errors: Errors = {}

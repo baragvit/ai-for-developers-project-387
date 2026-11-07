@@ -376,7 +376,7 @@ components:
         meetingUrl:
           type: string
           maxLength: 2048
-          pattern: ^https?://[^\s/?#]+[^\s]*$
+          pattern: ^https?://[^\s/?#:@][^\s/?#]*(?:[/?#][^\s]*)?$
           description: 'Необязательная ссылка на онлайн-встречу: абсолютная, только http или https, без пробелов.'
       description: Тип встречи, на который гость может записаться.
       example:

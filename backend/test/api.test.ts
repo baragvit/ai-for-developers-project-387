@@ -144,6 +144,7 @@ describe('HTTP API', () => {
     ['without a scheme', 'meet.google.com/abc-defg-hij', 'Укажите ссылку http или https'],
     ['with a javascript scheme', 'javascript:alert(1)', 'Укажите ссылку http или https'],
     ['without a host', 'https://', 'Укажите ссылку http или https'],
+    ['with an empty host and a port', 'https://:8080', 'Укажите ссылку http или https'],
     ['with spaces', 'https://meet.google.com/abc def', 'Укажите ссылку http или https'],
     ['longer than 2048 characters', `https://example.com/${'a'.repeat(2048)}`, 'Не длиннее 2048 символов'],
   ])('rejects an event type with a meeting link %s', async (_, meetingUrl, message) => {

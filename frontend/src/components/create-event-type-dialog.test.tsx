@@ -101,6 +101,7 @@ describe('Диалог создания типа встречи', () => {
     ['без схемы', 'meet.google.com/abc-defg-hij'],
     ['с недопустимой схемой', 'javascript:alert(1)'],
     ['без хоста', 'https://'],
+    ['с пустым хостом и портом', 'https://:8080'],
     ['с пробелом', 'https://meet.google.com/abc def'],
   ])('показывает ошибку ссылки %s до отправки', async (_, meetingUrl) => {
     const dialog = await openDialog()

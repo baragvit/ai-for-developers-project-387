@@ -83,7 +83,7 @@ model EventType {
 
   @doc("Необязательная ссылка на онлайн-встречу: абсолютная, только http или https, без пробелов.")
   @maxLength(2048)
-  @pattern("^https?://[^\\s/?#]+[^\\s]*$")
+  @pattern("^https?://[^\\s/?#:@][^\\s/?#]*(?:[/?#][^\\s]*)?$")
   meetingUrl?: string;
 }
 
