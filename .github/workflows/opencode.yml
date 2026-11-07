@@ -1,6 +1,7 @@
 name: opencode
-# The run budget below finds earlier runs of the same issue or PR by this title.
-run-name: opencode #${{ github.event.issue.number || github.event.pull_request.number }}
+# The run budget below finds earlier runs of the same issue or PR by this title. Quoted: unquoted, " #" starts a
+# YAML comment (scripts/check-workflows.mjs).
+run-name: "opencode #${{ github.event.issue.number || github.event.pull_request.number }}"
 
 on:
   issue_comment:

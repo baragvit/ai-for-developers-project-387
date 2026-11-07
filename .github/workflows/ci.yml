@@ -28,8 +28,8 @@ jobs:
           if-no-files-found: ignore
 
   # Independent browser check of the author's exact version (head SHA, not the temporary merge commit), with a trace
-  # and screenshots of passing tests. No model and no secrets, so it also runs for fork PRs. A new push produces a new
-  # artifact; the old one stays as evidence of the previous head.
+  # and screenshots of passing tests. No model and no secrets, so it also runs for fork PRs. A finished run's artifact
+  # stays as evidence of its head after new pushes; a run cancelled by a newer push leaves no artifact.
   browser-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

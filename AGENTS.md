@@ -34,7 +34,8 @@ npm run contract      # TypeSpec -> OpenAPI -> TS types and backend zod schemas
 npm run mock          # Prism mock on :4010
 npm run dev:backend   # :7341
 npm run dev:frontend  # :5391, proxies /api to API_PROXY_TARGET (default :7341)
-mise run check        # contract:check -> lint -> typecheck -> test -> check:rule-guard -> e2e; same command as CI (make check)
+mise run check        # contract:check -> check:workflows -> lint -> typecheck -> test -> check:rule-guard -> e2e; same command as CI (make check)
+mise run check:workflows  # workflow values cut by " #" (quote them) and the opencode.yml run budget vs run-name
 mise run check:rule-guard  # conflict API tests must fail with the overlap check patched out (also part of check)
 ```
 

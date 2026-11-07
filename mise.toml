@@ -46,10 +46,15 @@ run = "npm run test:e2e"
 description = "Fail unless the conflict API tests fail with the overlap check patched out"
 run = "scripts/rule-guard/check.sh"
 
+[tasks."check:workflows"]
+description = "Fail on workflow values cut by a YAML comment and on a run budget that does not match run-name"
+run = "node scripts/check-workflows.mjs"
+
 [tasks.check]
 description = "All checks, locally and in CI"
 run = [
   "mise run contract:check",
+  "mise run check:workflows",
   "mise run lint",
   "mise run typecheck",
   "mise run test",

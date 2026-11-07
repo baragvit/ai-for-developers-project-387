@@ -26,7 +26,7 @@ jobs:
       (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association) ||
        github.event.pull_request.user.login == 'opencode-agent[bot]')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       contents: read
       issues: read
@@ -145,7 +145,7 @@ jobs:
           PR as is. Do not post anything yourself.
           EOF
           set +e
-          timeout --kill-after=30s 15m opencode run \
+          timeout --kill-after=30s 20m opencode run \
             --model opencode/deepseek-v4.1-flash-free --title "review PR #$PR" --format json \
             -f "$CONTEXT/REVIEW.md" -f "$CONTEXT/pr.md" -f "$CONTEXT/issues.md" -f "$CONTEXT/commits.txt" \
             -f "$CONTEXT/diff.patch" -f "$CONTEXT/ci.md" -f "$CONTEXT/discussion.md" -f "$CONTEXT/sha.txt" \
@@ -168,6 +168,7 @@ jobs:
           REASON: ${{ steps.review.outputs.reason }}
           LOGS: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
+          mkdir -p "$CONTEXT"
           {
             echo "### Авторевью (opencode-review) для \`$HEAD_SHA\`"
             echo
