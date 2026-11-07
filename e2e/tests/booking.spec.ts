@@ -95,7 +95,7 @@ test.describe('Гость', () => {
   test('не может выбрать время, занятое встречей другого типа', async ({ page, request }) => {
     const hour = await createEventType(request, { durationMinutes: 60 })
     const halfHour = await createEventType(request)
-    const booked = await firstAvailableSlot(request, hour.id)
+    const booked = await firstAvailableSlot(request, hour.id, { skipToday: true })
     await bookViaApi(request, hour.id, booked.startAt)
 
     await page.goto(`/book/${halfHour.id}`)

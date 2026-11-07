@@ -24,11 +24,20 @@ export async function createEventType(
   return eventType
 }
 
-export async function firstAvailableSlot(request: APIRequestContext, eventTypeId: string): Promise<TimeSlot> {
+/**
+ * `skipToday` picks a slot from tomorrow on: near the end of the working day today may have no free time left
+ * for other event types, and the calendar disables such a day.
+ */
+export async function firstAvailableSlot(
+  request: APIRequestContext,
+  eventTypeId: string,
+  { skipToday = false } = {},
+): Promise<TimeSlot> {
   const res = await request.get(`/api/event-types/${eventTypeId}/slots`)
   expect(res.ok()).toBe(true)
   const slots = (await res.json()) as TimeSlot[]
-  const slot = slots.find((candidate) => candidate.available)
+  const today = moscowDay(new Date().toISOString())
+  const slot = slots.find((candidate) => candidate.available && (!skipToday || moscowDay(candidate.startAt) > today))
   if (!slot) throw new Error(`No available slots for ${eventTypeId}`)
   return slot
 }
