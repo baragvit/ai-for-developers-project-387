@@ -159,6 +159,9 @@ jobs:
           # links. Comments and pushes use the app token.
           GH_TOKEN: ${{ github.token }}
           MODEL: opencode/deepseek-v4.1-flash
+          # Nobody answers a permission prompt on the runner: an "ask" (the default for both) hangs until the timeout.
+          # /tmp holds the skills' notes (implement-spec); a denial is returned to the agent as an error.
+          OPENCODE_PERMISSION: '{"external_directory": {"*": "deny", "/tmp/*": "allow"}, "doom_loop": "deny"}'
           # Below the job's timeout-minutes, so the reason is recorded before the runner stops the job.
           AGENT_TIMEOUT: 55m
         run: |
