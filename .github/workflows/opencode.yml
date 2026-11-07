@@ -37,7 +37,8 @@ jobs:
       limit: ${{ steps.budget.outputs.limit }}
       reason: >-
         ${{ steps.run.outputs.reason ||
-        ((steps.checkout.outcome == 'failure' || steps.install.outcome == 'failure' || steps.key.outcome == 'failure')
+        ((steps.checkout.outcome == 'failure' || steps.mise.outcome == 'failure' || steps.deps.outcome == 'failure' ||
+        steps.install.outcome == 'failure' || steps.key.outcome == 'failure')
         && 'infra') || '' }}
     steps:
       # On a fork PR the agent would check out and could run the fork's code with the model key.
@@ -116,6 +117,19 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # Toolchain for `mise run check` in the agent's session (tdd in implement-spec, checks in the PR description).
+      - name: Install mise
+        id: mise
+        if: steps.budget.outputs.admitted == 'true'
+        uses: jdx/mise-action@v2
+
+      - name: Install dependencies and Playwright
+        id: deps
+        if: steps.budget.outputs.admitted == 'true'
+        run: |
+          mise run install
+          (cd e2e && npx playwright install --with-deps chromium)
+
       # Same steps as anomalyco/opencode/github@v1.19.5, but with the CLI pinned too (the action installs the latest
       # release) and a time limit that tells a timeout apart from other failures.
       - name: Install OpenCode
@@ -191,7 +205,7 @@ jobs:
             reason=$REASON
             case "$reason" in
               timeout) detail="Вызов агента превысил лимит времени и был остановлен." ;;
-              infra) detail="Сбой подготовки: checkout, установка OpenCode или нет секрета OPENCODE_API_KEY." ;;
+              infra) detail="Сбой подготовки: checkout, установка mise, зависимостей, Playwright или OpenCode, либо нет секрета OPENCODE_API_KEY." ;;
               *) detail="Агент завершился с ошибкой." ;;
             esac
           else
