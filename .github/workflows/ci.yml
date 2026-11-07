@@ -27,6 +27,61 @@ jobs:
             e2e/test-results
           if-no-files-found: ignore
 
+  # Independent browser check of the author's exact version (head SHA, not the temporary merge commit), with a trace
+  # and screenshots of passing tests. No model and no secrets, so it also runs for fork PRs. A new push produces a new
+  # artifact; the old one stays as evidence of the previous head.
+  browser-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@v2
+      - run: mise run install
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - name: Playwright on the head SHA
+        id: e2e
+        env:
+          E2E_EVIDENCE: "1"
+        run: |
+          set +e
+          npx playwright test --project=desktop
+          code=$?
+          if [ "$code" = 0 ]; then result=passed; else result=failed; fi
+          {
+            echo "pr: #${{ github.event.pull_request.number }}"
+            echo "event head sha: $HEAD_SHA"
+            echo "git rev-parse HEAD: $(git rev-parse HEAD)"
+            echo "result: $result"
+            echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+            echo "finished: $(date -u +%FT%TZ)"
+          } | tee browser-check.txt
+          {
+            echo '### Browser check'
+            echo '```'
+            cat browser-check.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+        working-directory: e2e
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: browser-check-${{ github.event.pull_request.head.sha }}
+          path: |
+            e2e/browser-check.txt
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: error
+
   docker:
     runs-on: ubuntu-latest
     needs: checks
