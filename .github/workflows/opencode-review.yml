@@ -146,7 +146,7 @@ jobs:
           EOF
           set +e
           timeout --kill-after=30s 20m opencode run \
-            --model opencode/deepseek-v4.1-flash-free --title "review PR #$PR" --format json \
+            --model opencode/deepseek-v4.1-flash --title "review PR #$PR" --format json \
             -f "$CONTEXT/REVIEW.md" -f "$CONTEXT/pr.md" -f "$CONTEXT/issues.md" -f "$CONTEXT/commits.txt" \
             -f "$CONTEXT/diff.patch" -f "$CONTEXT/ci.md" -f "$CONTEXT/discussion.md" -f "$CONTEXT/sha.txt" \
             -- "$(cat "$CONTEXT/prompt.md")" > "$CONTEXT/events.jsonl"
