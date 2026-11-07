@@ -1,6 +1,5 @@
 name: lighthouse-audit
-# Prepared in docs/workflows/ because the opencode-agent GitHub App has no `workflows` permission.
-# A human moves this file unchanged to .github/workflows/lighthouse-audit.yml in a separate commit.
+# The opencode-agent GitHub App has no `workflows` permission: the agent cannot push changes to this file.
 
 on:
   schedule:
