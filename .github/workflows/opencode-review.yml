@@ -1,0 +1,185 @@
+name: opencode-review
+
+# Independent review of every pull request, including the agent's own: plain OpenCode CLI writes the review, a
+# separate step posts it. It does not continue the implementation session and does not change code; a human hands
+# confirmed findings to the agent with /oc. `opencode github run` is not used here: it checks the event sender's
+# permission and stops with `permission: none` on PRs opened by the agent's app.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A new push cancels the review of the outdated head.
+concurrency:
+  group: opencode-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    # Branches of this repository only: fork PRs never get the model key (pull_request_target is not used). Authors:
+    # humans with write access and the agent's app; release-please PRs only bump the version and CHANGELOG.
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft &&
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association) ||
+       github.event.pull_request.user.login == 'opencode-agent[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      issues: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      CONTEXT: /tmp/review
+    steps:
+      # The author's version, not the temporary merge commit.
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Criteria come from the base branch, so a PR cannot relax its own review; a PR that adds REVIEW.md is reviewed
+      # with its own version.
+      - name: Collect review context
+        run: |
+          mkdir -p "$CONTEXT"
+          echo "Reviewed head SHA: $(git rev-parse HEAD)" | tee "$CONTEXT/sha.txt"
+          if git show "origin/$BASE_REF:REVIEW.md" > "$CONTEXT/REVIEW.md" 2>/dev/null; then
+            echo "REVIEW.md: from $BASE_REF"
+          else
+            cp REVIEW.md "$CONTEXT/REVIEW.md"
+            echo "REVIEW.md: not on $BASE_REF yet, taken from the PR head"
+          fi
+          gh pr view "$PR" --json number,title,author,headRefName,baseRefName,headRefOid,body \
+            --template '# PR #{{.number}}: {{.title}}{{"\n"}}Author: {{.author.login}}, {{.headRefName}} -> {{.baseRefName}}, head {{.headRefOid}}{{"\n\n"}}{{.body}}{{"\n"}}' \
+            > "$CONTEXT/pr.md"
+          git log --format='%h %s' "origin/$BASE_REF..HEAD" > "$CONTEXT/commits.txt"
+          gh pr diff "$PR" > "$CONTEXT/diff.patch"
+
+          # Issues the PR links to (#N or full URLs): the request, the spec, the tickets and the human approval.
+          refs=$(gh pr view "$PR" --json body --jq .body \
+            | grep -oE "(github\.com/$GITHUB_REPOSITORY/(issues|pull)/|#)[0-9]+" | grep -oE '[0-9]+$' \
+            | sort -un | head -n 15 || true)
+          for n in $refs; do
+            if [ "$n" = "$PR" ]; then continue; fi
+            echo "=================== #$n ==================="
+            gh issue view "$n" --comments || echo "(#$n is not available)"
+          done > "$CONTEXT/issues.md"
+          [ -s "$CONTEXT/issues.md" ] || echo "(the PR description links no issues)" > "$CONTEXT/issues.md"
+
+          # Earlier reviews and the human's decisions on them, so a repeat review does not reopen settled findings.
+          {
+            echo "## Conversation"
+            gh pr view "$PR" --comments
+            echo
+            echo "## Line comments"
+            gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/comments" \
+              --jq '.[] | "- \(.user.login) on \(.path):\(.line // .original_line) (\(.created_at)): \(.body)"'
+          } > "$CONTEXT/discussion.md"
+
+      # CI runs in parallel; give it a bounded time so the review sees finished results where possible.
+      - name: Wait for CI
+        run: |
+          for _ in $(seq 1 40); do
+            pending=$(gh pr checks "$PR" --json name,bucket,workflow \
+              --jq '[.[] | select(.workflow != "opencode-review" and .bucket == "pending")] | length' || true)
+            if [ "$pending" = "0" ]; then break; fi
+            sleep 15
+          done
+          {
+            echo "CI state at $(date -u +%FT%TZ) for $HEAD_SHA:"
+            gh pr checks "$PR" --json name,workflow,state,link \
+              --jq '.[] | select(.workflow != "opencode-review") | "- \(.workflow) / \(.name): \(.state) \(.link)"' || true
+          } > "$CONTEXT/ci.md"
+          cat "$CONTEXT/ci.md"
+
+      - name: Install OpenCode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.19.5 --no-modify-path
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      # Read-only agent: no edits, no shell (so no git, gh or test runs), no web. Project config is ignored, so the
+      # PR cannot widen these permissions through opencode.json.
+      - name: Review
+        id: review
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_DISABLE_PROJECT_CONFIG: "true"
+          OPENCODE_CONFIG_CONTENT: >-
+            {"small_model": "opencode/deepseek-v4.1-flash-free",
+             "permission": {"edit": "deny", "bash": "deny", "webfetch": "deny", "websearch": "deny",
+                            "task": "deny", "external_directory": "deny"}}
+        run: |
+          cat > "$CONTEXT/prompt.md" <<EOF
+          You are an independent code reviewer of pull request #$PR in $GITHUB_REPOSITORY. You did not write this
+          code and you do not continue anyone's session. You cannot edit files or run commands; the working directory
+          is the PR head checkout, read any file in it to verify a finding.
+
+          Attached:
+          - REVIEW.md: the review criteria for this project. Follow them, including the finding format.
+          - pr.md: the PR title and description (checks, risk, rollback).
+          - issues.md: the issues the description links: original request, spec, tickets, human approval comment.
+          - commits.txt, diff.patch: the commits and the full diff against $BASE_REF.
+          - ci.md: CI results available when the review started (they may still be running).
+          - discussion.md: earlier reviews and the human's decisions on them.
+          - sha.txt: the head SHA under review.
+
+          Check that the change does what the spec and tickets ask and nothing outside the approved scope. If the
+          spec, the tickets or the human approval are not linked or not available, say so as a finding. Check the
+          risk assessment and the depth of the checks in the description against the consequences of a mistake.
+          Findings the human already settled in discussion.md are not repeated; review new commits for the behavior
+          they touch.
+
+          Answer in Russian, as GitHub Markdown, and put the whole review in your final message: it is posted to the
+          PR as is. Do not post anything yourself.
+          EOF
+          set +e
+          timeout --kill-after=30s 20m opencode run \
+            --model opencode/deepseek-v4.1-flash-free --title "review PR #$PR" --format json \
+            -f "$CONTEXT/REVIEW.md" -f "$CONTEXT/pr.md" -f "$CONTEXT/issues.md" -f "$CONTEXT/commits.txt" \
+            -f "$CONTEXT/diff.patch" -f "$CONTEXT/ci.md" -f "$CONTEXT/discussion.md" -f "$CONTEXT/sha.txt" \
+            -- "$(cat "$CONTEXT/prompt.md")" > "$CONTEXT/events.jsonl"
+          code=$?
+          set -e
+          jq -rs '[.[] | select(.type == "text") | .part.text] | last // ""' "$CONTEXT/events.jsonl" > "$CONTEXT/review.md"
+          if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+            echo "reason=timeout" >> "$GITHUB_OUTPUT"
+          elif [ "$code" != 0 ] || [ ! -s "$CONTEXT/review.md" ] || [ "$(tr -d '[:space:]' < "$CONTEXT/review.md")" = "" ]; then
+            jq -c 'select(.type == "error")' "$CONTEXT/events.jsonl" || true
+            echo "reason=agent_failed" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$code"
+
+      # Publishing is not the model's job; it also reports a failed review instead of staying silent.
+      - name: Publish review
+        if: ${{ !cancelled() }}
+        env:
+          REASON: ${{ steps.review.outputs.reason }}
+          LOGS: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          mkdir -p "$CONTEXT"
+          {
+            echo "### Авторевью (opencode-review) для \`$HEAD_SHA\`"
+            echo
+            if [ -s "$CONTEXT/review.md" ] && [ -z "$REASON" ]; then
+              cat "$CONTEXT/review.md"
+            else
+              echo "Ревью не выполнено: \`${REASON:-infra}\`. Нужен человек: проверьте лог."
+            fi
+            echo
+            echo "---"
+            echo "_Независимое ревью без права менять код. Исправление запускает человек командой \`/oc\`. [Лог]($LOGS)_"
+          } > "$CONTEXT/comment.md"
+          cat "$CONTEXT/comment.md" >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "$PR" --body-file "$CONTEXT/comment.md"

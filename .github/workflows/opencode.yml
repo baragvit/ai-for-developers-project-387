@@ -1,4 +1,7 @@
 name: opencode
+# The run budget below finds earlier runs of the same issue or PR by this title. Quoted: unquoted, " #" starts a
+# YAML comment (scripts/check-workflows.mjs).
+run-name: "opencode #${{ github.event.issue.number || github.event.pull_request.number }}"
 
 on:
   issue_comment:
@@ -11,19 +14,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  opencode:
+  agent:
     # Command in the comment, a human author with write access to the repo; bots (including the agent) are ignored.
     if: |
       (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode')) &&
       github.event.comment.user.type != 'Bot' &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
+      actions: read
       contents: read
       id-token: write
       issues: write
       pull-requests: read
+    outputs:
+      trusted: ${{ steps.origin.outputs.trusted }}
+      pr: ${{ steps.origin.outputs.pr }}
+      head_sha: ${{ steps.origin.outputs.head_sha }}
+      admitted: ${{ steps.budget.outputs.admitted }}
+      used: ${{ steps.budget.outputs.used }}
+      limit: ${{ steps.budget.outputs.limit }}
+      reason: >-
+        ${{ steps.run.outputs.reason ||
+        ((steps.checkout.outcome == 'failure' || steps.install.outcome == 'failure' || steps.key.outcome == 'failure')
+        && 'infra') || '' }}
     steps:
       # On a fork PR the agent would check out and could run the fork's code with the model key.
       - name: Skip pull requests from forks
@@ -34,7 +49,9 @@ jobs:
         run: |
           head="$GITHUB_REPOSITORY"
           if [ -n "$PR" ]; then
-            head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.repo.full_name)
+            read -r head sha < <(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '"\(.head.repo.full_name) \(.head.sha)"')
+            echo "pr=$PR" >> "$GITHUB_OUTPUT"
+            echo "head_sha=$sha" >> "$GITHUB_OUTPUT"
           fi
           if [ "$head" = "$GITHUB_REPOSITORY" ]; then
             echo "trusted=true" >> "$GITHUB_OUTPUT"
@@ -43,21 +60,152 @@ jobs:
             echo "trusted=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout repository
+      # Counts admitted attempts in the Actions history of this workflow: every earlier run of this PR and every
+      # attempt (Re-run) whose "Admit request" step succeeded, whatever happened after it (success, failure, timeout,
+      # cancel). The agent's tokens cannot rewrite that history; comments are only reports.
+      - name: Check run budget
+        id: budget
         if: steps.origin.outputs.trusted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.origin.outputs.pr }}
+          LIMIT: 3
+        run: |
+          echo "limit=$LIMIT" >> "$GITHUB_OUTPUT"
+          if [ -z "$PR" ]; then
+            echo "::notice::Issue, not a pull request: the per-PR budget does not apply."
+            echo "admitted=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          created=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .created_at)
+          used=0
+          while read -r id attempts; do
+            for attempt in $(seq 1 "$attempts"); do
+              if [ "$id" = "$GITHUB_RUN_ID" ] && [ "$attempt" = "$GITHUB_RUN_ATTEMPT" ]; then continue; fi
+              n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/attempts/$attempt/jobs" \
+                --jq '[.jobs[] | select(.name == "agent") | .steps[] | select(.name == "Admit request" and .conclusion == "success")] | length')
+              used=$((used + n))
+            done
+          done < <(gh api -X GET --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/opencode.yml/runs" \
+            -f per_page=100 -f created=">=$created" \
+            --jq ".workflow_runs[] | select(.display_title == \"opencode #$PR\") | \"\(.id) \(.run_attempt)\"")
+          if [ "$used" -ge "$LIMIT" ]; then
+            echo "::warning::PR #$PR used $used of $LIMIT agent runs: limit_exhausted, the model is not called."
+            echo "admitted=false" >> "$GITHUB_OUTPUT"
+            echo "used=$used" >> "$GITHUB_OUTPUT"
+          else
+            echo "admitted=true" >> "$GITHUB_OUTPUT"
+            echo "used=$((used + 1))" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The budget counts this step: keep its name in sync with the jq filter above.
+      - name: Admit request
+        if: steps.budget.outputs.admitted == 'true'
+        env:
+          PR: ${{ steps.origin.outputs.pr }}
+          USED: ${{ steps.budget.outputs.used }}
+          LIMIT: ${{ steps.budget.outputs.limit }}
+        run: |
+          if [ -n "$PR" ]; then echo "::notice::PR #$PR: agent run $USED of $LIMIT."; fi
+
+      - name: Checkout repository
+        id: checkout
+        if: steps.budget.outputs.admitted == 'true'
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
           persist-credentials: false
 
+      # Same steps as anomalyco/opencode/github@v1.19.5, but with the CLI pinned too (the action installs the latest
+      # release) and a time limit that tells a timeout apart from other failures.
+      - name: Install OpenCode
+        id: install
+        if: steps.budget.outputs.admitted == 'true'
+        run: |
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.19.5 --no-modify-path
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Check model key
+        id: key
+        if: steps.budget.outputs.admitted == 'true'
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          if [ -z "$OPENCODE_API_KEY" ]; then
+            echo "::error::Secret OPENCODE_API_KEY is not set."
+            exit 1
+          fi
+
       - name: Run OpenCode
-        if: steps.origin.outputs.trusted == 'true'
-        uses: anomalyco/opencode/github@810c0eba1a7348036f8bdf61e6632d0c36c6876c # v1.19.5
+        id: run
+        if: steps.budget.outputs.admitted == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # Token for `gh` in the skills (docs/agents/issue-tracker.md): reads the repo, writes issues, labels and their
           # links. Comments and pushes use the app token.
           GH_TOKEN: ${{ github.token }}
-        with:
-          model: opencode/deepseek-v4.1-flash-free
-          share: false
+          MODEL: opencode/deepseek-v4.1-flash-free
+          # Below the job's timeout-minutes, so the reason is recorded before the runner stops the job.
+          AGENT_TIMEOUT: 55m
+        run: |
+          set +e
+          timeout --kill-after=30s "$AGENT_TIMEOUT" opencode github run
+          code=$?
+          case "$code" in
+            0) reason=success ;;
+            124 | 137) reason=timeout ;;
+            *) reason=agent_failed ;;
+          esac
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+  # Reports a refused or failed run without calling the model; a successful run answers through the agent's comment.
+  report:
+    needs: agent
+    if: |
+      always() && needs.agent.result != 'skipped' && needs.agent.outputs.trusted == 'true' &&
+      (needs.agent.outputs.admitted == 'false' || needs.agent.result != 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Post the outcome
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          PR: ${{ needs.agent.outputs.pr }}
+          HEAD_SHA: ${{ needs.agent.outputs.head_sha }}
+          ADMITTED: ${{ needs.agent.outputs.admitted }}
+          USED: ${{ needs.agent.outputs.used }}
+          LIMIT: ${{ needs.agent.outputs.limit }}
+          REASON: ${{ needs.agent.outputs.reason }}
+          RESULT: ${{ needs.agent.result }}
+          LOGS: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          if [ "$ADMITTED" = "false" ]; then
+            reason=limit_exhausted
+            detail="PR #$PR уже использовал $USED из $LIMIT запусков агента; модель не вызывалась."
+          elif [ -n "$REASON" ] && [ "$REASON" != "success" ]; then
+            reason=$REASON
+            case "$reason" in
+              timeout) detail="Вызов агента превысил лимит времени и был остановлен." ;;
+              infra) detail="Сбой подготовки: checkout, установка OpenCode или нет секрета OPENCODE_API_KEY." ;;
+              *) detail="Агент завершился с ошибкой." ;;
+            esac
+          else
+            reason=unknown
+            detail="Задание агента завершилось со статусом \`$RESULT\` без записанной причины (отмена вручную или тайм-аут задания); проверьте лог."
+          fi
+          {
+            echo "**Агент: \`$reason\`, нужен человек.**"
+            echo
+            echo "$detail"
+            echo
+            if [ -n "$HEAD_SHA" ]; then echo "- Последний SHA PR: \`$HEAD_SHA\`"; fi
+            if [ -n "$PR" ] && [ -n "$USED" ]; then echo "- Бюджет: $USED из $LIMIT запусков"; fi
+            echo "- Логи: $LOGS"
+          } > outcome.md
+          cat outcome.md >> "$GITHUB_STEP_SUMMARY"
+          gh issue comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --body-file outcome.md

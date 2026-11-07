@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test'
 
 const PORT = Number(process.env.E2E_PORT ?? 7399)
 const baseURL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`
+// Evidence run in CI (job browser-check): a trace and a screenshot for passing tests too.
+const evidence = Boolean(process.env.E2E_EVIDENCE)
 
 export default defineConfig({
   testDir: './tests',
@@ -14,8 +16,8 @@ export default defineConfig({
     baseURL,
     locale: 'ru-RU',
     timezoneId: 'Europe/Moscow',
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    trace: evidence ? 'on' : 'retain-on-failure',
+    screenshot: evidence ? 'on' : 'only-on-failure',
   },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },

@@ -64,6 +64,8 @@ export const moscowDate = (iso: string) =>
 /** Opens the calendar day containing `iso` (browser runs in Europe/Moscow), paging months if needed. */
 export async function selectDay(page: Page, iso: string) {
   const cell = page.locator(`td[data-day="${moscowDay(iso)}"] button`)
+  // isVisible() does not wait: before the calendar renders it would page to a disabled next month.
+  await page.locator('.rdp-month_grid').waitFor()
   for (let i = 0; i < 2 && !(await cell.isVisible()); i += 1) {
     await page.locator('.rdp-button_next').click()
   }
