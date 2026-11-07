@@ -5,6 +5,7 @@ import { zAdminCreateEventTypeBody, zPublicCreateBookingBody } from './model/zod
 /** Patterns from the contract have no readable meaning on their own, so their message is set per field. */
 const patternMessages: Record<string, string> = {
   id: 'Только латиница в нижнем регистре, цифры и дефисы',
+  meetingUrl: 'Укажите ссылку http или https',
 }
 
 function russianMessage(issue: z.core.$ZodRawIssue): string | undefined {

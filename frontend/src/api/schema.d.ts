@@ -169,6 +169,8 @@ export interface components {
             guestName: string;
             guestEmail: string;
             comment?: string;
+            /** @description Ссылка на онлайн-встречу из типа встречи; отсутствует, если у типа её нет. */
+            meetingUrl?: string;
             /** Format: date-time */
             createdAt: string;
         };
@@ -219,6 +221,8 @@ export interface components {
              * @description Длительность встречи в минутах, кратна 5.
              */
             durationMinutes: number;
+            /** @description Необязательная ссылка на онлайн-встречу: абсолютная, только http или https, без пробелов. */
+            meetingUrl?: string;
         };
         /** @description Ошибка валидации конкретного поля. */
         FieldError: {

@@ -80,6 +80,11 @@ model EventType {
   @maxValue(240)
   @JsonSchema.multipleOf(5)
   durationMinutes: int32;
+
+  @doc("Необязательная ссылка на онлайн-встречу: абсолютная, только http или https, без пробелов.")
+  @maxLength(2048)
+  @pattern("^https?://[^\\s/?#]+[^\\s]*$")
+  meetingUrl?: string;
 }
 
 @doc("Слот в расписании для конкретного типа встречи: интервал [startAt, endAt).")
@@ -143,6 +148,10 @@ model Booking {
   guestName: string;
   guestEmail: string;
   comment?: string;
+
+  @doc("Ссылка на онлайн-встречу из типа встречи; отсутствует, если у типа её нет.")
+  meetingUrl?: string;
+
   createdAt: utcDateTime;
 }
 

@@ -3,6 +3,7 @@ export type EventType = {
   name: string
   description: string
   durationMinutes: number
+  meetingUrl?: string
 }
 
 export type Interval = {

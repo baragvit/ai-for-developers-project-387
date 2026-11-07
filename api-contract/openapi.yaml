@@ -282,6 +282,9 @@ components:
           type: string
         comment:
           type: string
+        meetingUrl:
+          type: string
+          description: Ссылка на онлайн-встречу из типа встречи; отсутствует, если у типа её нет.
         createdAt:
           type: string
           format: date-time
@@ -370,6 +373,11 @@ components:
           maximum: 240
           multipleOf: 5
           description: Длительность встречи в минутах, кратна 5.
+        meetingUrl:
+          type: string
+          maxLength: 2048
+          pattern: ^https?://[^\s/?#]+[^\s]*$
+          description: 'Необязательная ссылка на онлайн-встречу: абсолютная, только http или https, без пробелов.'
       description: Тип встречи, на который гость может записаться.
       example:
         id: consultation

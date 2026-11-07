@@ -1,6 +1,12 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test'
 
-export type EventType = { id: string; name: string; description: string; durationMinutes: number }
+export type EventType = {
+  id: string
+  name: string
+  description: string
+  durationMinutes: number
+  meetingUrl?: string
+}
 export type TimeSlot = { startAt: string; endAt: string; available: boolean }
 
 let counter = 0

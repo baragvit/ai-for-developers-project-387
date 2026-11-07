@@ -1,5 +1,15 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { ArrowLeft, CalendarCheck2, CalendarX2, CheckCircle2, Clock, Globe, Loader2, User } from 'lucide-react'
+import {
+  ArrowLeft,
+  CalendarCheck2,
+  CalendarX2,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  Globe,
+  Loader2,
+  User,
+} from 'lucide-react'
 import { ru } from 'react-day-picker/locale'
 import { Link, useParams } from 'react-router'
 import { toast } from 'sonner'
@@ -399,6 +409,14 @@ function BookingConfirmation({ booking, onBookAnother }: { booking: Booking; onB
           <p className="text-muted-foreground">{booking.guestEmail}</p>
           {booking.comment && <p className="break-words text-muted-foreground">{booking.comment}</p>}
         </div>
+        {booking.meetingUrl && (
+          <Button asChild className="mt-4">
+            <a href={booking.meetingUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink />
+              Подключиться к встрече
+            </a>
+          </Button>
+        )}
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
           <Button variant="outline" onClick={onBookAnother}>
             Записаться ещё раз

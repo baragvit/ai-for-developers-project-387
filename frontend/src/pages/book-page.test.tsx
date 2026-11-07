@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { TimeSlot } from '@/api/client'
@@ -158,5 +158,46 @@ describe('Форма записи', () => {
     expect(screen.getByLabelText('Ваше имя')).toHaveValue('Ольга')
     expect(screen.getByLabelText('Email')).toHaveValue('olga@example.com')
     expect(screen.getByLabelText(/Комментарий/)).toHaveValue('Про интеграцию')
+  })
+})
+
+describe('Подтверждение записи', () => {
+  const booking = {
+    id: '6ba7b810-9dad-41d1-80b4-00c04fd430c8',
+    eventTypeId: eventType.id,
+    eventTypeName: eventType.name,
+    startAt: '2026-11-09T14:30:00.000Z',
+    endAt: '2026-11-09T15:00:00.000Z',
+    guestName: 'Ольга',
+    guestEmail: 'olga@example.com',
+    createdAt: '2026-11-09T05:00:00.000Z',
+  }
+
+  async function bookFirstSlot(meetingUrl?: string) {
+    openBookPage(slots)
+    await userEvent.click((await screen.findAllByTestId('slot'))[0]!)
+    await userEvent.type(screen.getByLabelText('Ваше имя'), 'Ольга')
+    await userEvent.type(screen.getByLabelText('Email'), 'olga@example.com')
+
+    respond('POST', '/api/bookings', meetingUrl ? { ...booking, meetingUrl } : booking, 201)
+    await userEvent.click(screen.getByRole('button', { name: 'Записаться' }))
+
+    return screen.findByTestId('booking-confirmation')
+  }
+
+  it('показывает безопасную ссылку на встречу, если она есть у типа встречи', async () => {
+    const confirmation = await bookFirstSlot('https://meet.google.com/abc-defg-hij')
+
+    const link = await within(confirmation).findByRole('link', { name: 'Подключиться к встрече' })
+    expect(link).toHaveAttribute('href', 'https://meet.google.com/abc-defg-hij')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('не показывает блок со ссылкой, если у типа встречи её нет', async () => {
+    const confirmation = await bookFirstSlot()
+
+    await within(confirmation).findByText('Запись подтверждена')
+    expect(within(confirmation).queryByRole('link', { name: 'Подключиться к встрече' })).not.toBeInTheDocument()
   })
 })
