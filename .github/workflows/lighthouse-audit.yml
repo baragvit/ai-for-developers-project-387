@@ -152,6 +152,16 @@ jobs:
               continue
             }
 
+            // A page that failed to load (e.g. 503 while Render wakes up) still yields a JSON with null scores.
+            if (report.runtimeError || report.categories?.performance?.score == null) {
+              const why = report.runtimeError
+                ? `Lighthouse runtime error ${report.runtimeError.code}: ${report.runtimeError.message}`
+                : 'Lighthouse returned no performance score'
+              pages.push({ path: pagePath, url: pageUrl, available: false, reason: why })
+              missingData.push({ path: pagePath, reason: why })
+              continue
+            }
+
             const performance = report.categories?.performance?.score != null
               ? round(report.categories.performance.score * 100)
               : null
