@@ -40,6 +40,7 @@ mise run check:rule-guard  # conflict API tests must fail with the overlap check
 
 - e2e starts the production build on `E2E_PORT` (default 7399) and reuses a server already listening there outside CI; give parallel worktrees distinct ports: `E2E_PORT=7420 mise run check`.
 - CI (`.github/workflows/ci.yml`): `mise run check`, then a Docker image build with a smoke test.
+- Agent in GitHub (`.github/workflows/opencode.yml`): OpenCode answers `/oc` and `/opencode` in issue and PR comments by trusted humans; see README «Агент в GitHub». On that runner you cannot ask questions mid-session: put open questions in your reply comment.
 - Releases: release-please on push to `main` keeps a release PR (one version in the root `package.json`, one `CHANGELOG.md`, tag `vX.Y.Z`) built from Conventional Commits; a human merges it. Config: `release-please-config.json`, `.release-please-manifest.json`.
 
 ## Tests

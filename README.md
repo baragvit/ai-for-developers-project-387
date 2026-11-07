@@ -190,6 +190,24 @@ API-тесты вызывают сервер через `injectChecked` (`backen
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) на каждый push и pull request запускает `mise run check` (в том числе `check:rule-guard`), а затем собирает Docker-образ и делает смоук-тест: `/api/owner`, `/api/event-types` и SPA на `/` отвечают.
 
+## Агент в GitHub
+
+Агент — [OpenCode](https://opencode.ai/docs/github/) в GitHub Actions. Он работает с теми же скиллами и правилами, что и локальный агент первого проекта: скиллы лежат в репозитории (`.agents/skills/`, `.claude/skills/`), OpenCode находит их сам; настройки трекера — в [`docs/agents/`](docs/agents/), правила — в [`AGENTS.md`](AGENTS.md).
+
+| Воркфлоу | Событие | Модель | Назначение | Где результат |
+| --- | --- | --- | --- | --- |
+| [`opencode.yml`](.github/workflows/opencode.yml) | `issue_comment` и `pull_request_review_comment`, `types: [created]` | `opencode/deepseek-v4.1-flash-free` (OpenCode Zen) | ответ на команду в обсуждении issue или PR и в комментарии к строке diff; по просьбе — ветка и PR с правками или коммит в ветку PR | комментарий `opencode-agent[bot]` в том же issue или PR; прогон — во вкладке [Actions](https://github.com/baragvit/ai-for-developers-project-387/actions/workflows/opencode.yml) |
+
+**Как вызвать.** Команды — набор OpenCode по умолчанию, `mentions` не переопределён: `/opencode` и `/oc`. Название скилла передаётся текстом команды, например `/oc запусти скилл to-spec по обсуждению этого issue` или `/oc explain this issue`. Агент не задаёт вопросов в ходе сессии: вопросы и решения остаются в обсуждении, следующая сессия читает их перед работой.
+
+**Кто может вызвать.** Запуск пропускается до вызова модели, если в комментарии нет команды, автор — бот (в том числе сам агент) или не владелец, участник организации или коллаборатор репозитория. OpenCode дополнительно проверяет, что у автора есть права на запись. Для PR из fork агент не запускается, так как он забрал бы и мог выполнить код fork с ключом модели; `pull_request_target` не используется.
+
+**Авторизация и права.** Стандартный режим OpenCode: установлено GitHub App [opencode-agent](https://github.com/apps/opencode-agent), воркфлоу через `id-token: write` обменивает OIDC-токен на токен приложения, и комментарии и push идут от имени приложения. Поэтому у `actions/checkout` стоит `persist-credentials: false`, а у `GITHUB_TOKEN` — только чтение: `contents: read` для checkout, `issues: read` и `pull-requests: read` для `gh` в скиллах.
+
+**Ключ и сессии.** Ключ модели — секрет `OPENCODE_API_KEY` в *Settings → Secrets and variables → Actions*; бесплатная модель Zen не требует карты. Сессии не публикуются: `share: false` (в OpenCode v1.19.5 публикация сессий отключена совсем, параметр оставлен, чтобы решение было записано явно).
+
+**Ограничения и остановка.** У задания `timeout-minutes: 30`; `concurrency` держит один прогон на issue или PR, следующий ждёт в очереди. Текущий прогон останавливает **Cancel workflow** в Actions, будущие — **Disable workflow**; уже отправленный провайдеру запрос может доработать по его правилам, при необходимости ключ отзывается в [консоли OpenCode](https://opencode.ai/auth). Action OpenCode закреплён на коммите релиза `v1.19.5`.
+
 ## Релизы
 
 Версии и `CHANGELOG.md` выпускает [release-please](https://github.com/googleapis/release-please) из [Conventional Commits](https://www.conventionalcommits.org/ru/). Версия одна на всё приложение — в корневом `package.json`, тег `vX.Y.Z`; пакеты `api-contract`, `backend`, `frontend` и `e2e` в релизе не участвуют.
