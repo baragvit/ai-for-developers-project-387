@@ -61,6 +61,7 @@ test.describe('Гость', () => {
     await expect(confirmation).toContainText(guestName)
     await expect(confirmation).toContainText('olga@example.com')
     await expect(confirmation).toContainText('Хочу обсудить интеграцию')
+    await expect(confirmation.getByRole('link', { name: 'Подключиться к встрече' })).toHaveCount(0)
 
     await confirmation.getByRole('button', { name: 'Записаться ещё раз' }).click()
     await selectDay(page, slot.startAt)
@@ -73,6 +74,39 @@ test.describe('Гость', () => {
     await expect(row).toContainText(eventType.name)
     await expect(row).toContainText('olga@example.com')
     await expect(row).toContainText('Хочу обсудить интеграцию')
+    await expect(row.getByRole('link', { name: 'Подключиться к встрече' })).toHaveCount(0)
+  })
+
+  test('видит ссылку на встречу в подтверждении, а владелец — в предстоящих встречах', async ({
+    page,
+    request,
+  }) => {
+    const meetingUrl = 'https://meet.google.com/abc-defg-hij'
+    const guestName = `Ольга Со ссылкой ${Date.now()}`
+    const eventType = await createEventType(request, { meetingUrl })
+    const slot = await firstAvailableSlot(request, eventType.id)
+
+    await page.goto(`/book/${eventType.id}`)
+    await selectDay(page, slot.startAt)
+    await slotButton(page, slot.startAt).click()
+    await page.getByLabel('Ваше имя').fill(guestName)
+    await page.getByLabel('Email').fill('olga@example.com')
+    await page.getByRole('button', { name: 'Записаться' }).click()
+
+    const link = page.getByTestId('booking-confirmation').getByRole('link', { name: 'Подключиться к встрече' })
+    await expect(link).toBeVisible()
+    await expect(link).toHaveAttribute('href', meetingUrl)
+    await expect(link).toHaveAttribute('target', '_blank')
+    await expect(link).toHaveAttribute('rel', /noopener noreferrer/)
+
+    await page.goto('/admin')
+    const ownerLink = page.getByTestId('booking-row').filter({ hasText: guestName }).getByRole('link', {
+      name: 'Подключиться к встрече',
+    })
+    await expect(ownerLink).toBeVisible()
+    await expect(ownerLink).toHaveAttribute('href', meetingUrl)
+    await expect(ownerLink).toHaveAttribute('target', '_blank')
+    await expect(ownerLink).toHaveAttribute('rel', /noopener noreferrer/)
   })
 
   test('из подтверждения переходит к другим типам встреч', async ({ page, request }) => {

@@ -77,6 +77,12 @@ describe('HTTP API', () => {
       description: 'Обсудим ваш проект, задачи и ответим на вопросы.',
       durationMinutes: 30,
     })
+    expect(list.json().find((eventType: { id: string }) => eventType.id === 'code-review')).toMatchObject({
+      meetingUrl: 'https://meet.google.com/abc-defg-hij',
+    })
+    expect(list.json().find((eventType: { id: string }) => eventType.id === 'tech-interview')).not.toHaveProperty(
+      'meetingUrl',
+    )
 
     const one = await injectChecked(app, { method: 'GET', url: '/api/event-types/code-review' })
     expect(one.json()).toMatchObject({ id: 'code-review', durationMinutes: 45 })
@@ -112,6 +118,51 @@ describe('HTTP API', () => {
       ]),
     )
     expect(invalid.json().details).toHaveLength(3)
+  })
+
+  it('creates an event type with an online meeting link and exposes it to guests', async () => {
+    const payload = {
+      id: 'mentor-call',
+      name: 'Менторский звонок',
+      description: '',
+      durationMinutes: 30,
+      meetingUrl: 'https://meet.google.com/abc-defg-hij',
+    }
+
+    const created = await injectChecked(app, { method: 'POST', url: '/api/admin/event-types', payload })
+    expect(created.statusCode).toBe(201)
+    expect(created.json()).toEqual(payload)
+
+    const one = await injectChecked(app, { method: 'GET', url: '/api/event-types/mentor-call' })
+    expect(one.json()).toMatchObject({ meetingUrl: 'https://meet.google.com/abc-defg-hij' })
+
+    const list = await injectChecked(app, { method: 'GET', url: '/api/event-types' })
+    expect(list.json().find((eventType: { id: string }) => eventType.id === 'mentor-call')).toEqual(payload)
+  })
+
+  it.each([
+    ['without a scheme', 'meet.google.com/abc-defg-hij', 'Укажите ссылку http или https'],
+    ['with a javascript scheme', 'javascript:alert(1)', 'Укажите ссылку http или https'],
+    ['without a host', 'https://', 'Укажите ссылку http или https'],
+    ['with an empty host and a port', 'https://:8080', 'Укажите ссылку http или https'],
+    ['with spaces', 'https://meet.google.com/abc def', 'Укажите ссылку http или https'],
+    ['longer than 2048 characters', `https://example.com/${'a'.repeat(2048)}`, 'Не длиннее 2048 символов'],
+  ])('rejects an event type with a meeting link %s', async (_, meetingUrl, message) => {
+    const res = await injectChecked(app, {
+      method: 'POST',
+      url: '/api/admin/event-types',
+      payload: { ...validEventType, meetingUrl },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({
+      code: 'VALIDATION_ERROR',
+      message: 'Проверьте правильность заполнения полей',
+      details: [{ field: 'meetingUrl', message }],
+    })
+
+    const list = await injectChecked(app, { method: 'GET', url: '/api/event-types' })
+    expect(list.json().map((eventType: { id: string }) => eventType.id)).not.toContain(validEventType.id)
   })
 
   const validEventType = { id: 'quick-sync', name: 'Быстрый созвон', description: '', durationMinutes: 15 }
@@ -270,8 +321,27 @@ describe('HTTP API', () => {
         guestName: 'Иван Петров',
         guestEmail: 'ivan@example.com',
         comment: 'Обсудить архитектуру',
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
         createdAt: '2026-11-09T05:00:00.000Z',
       })
+    })
+
+    it('returns the event type meeting link in the booking confirmation', async () => {
+      const res = await postBooking(app, {
+        ...bookingBody,
+        eventTypeId: 'code-review',
+        startAt: '2026-11-09T06:45:00Z',
+      })
+
+      expect(res.statusCode).toBe(201)
+      expect(res.json()).toMatchObject({ meetingUrl: 'https://meet.google.com/abc-defg-hij' })
+    })
+
+    it('leaves the meeting link out of a booking of an event type without one', async () => {
+      const res = await postBooking(app, bookingBody)
+
+      expect(res.statusCode).toBe(201)
+      expect(res.json()).not.toHaveProperty('meetingUrl')
     })
 
     it('trims guest fields and treats a blank comment as absent', async () => {
@@ -418,6 +488,18 @@ describe('HTTP API', () => {
         ['Понедельник, 11:00', 'Консультация'],
         ['Вторник', 'Техническое интервью'],
       ])
+    })
+
+    it('includes the event type meeting link for linked bookings and omits it otherwise', async () => {
+      expect((await book(app, 'code-review', '2026-11-09T06:00:00Z', 'Со ссылкой')).statusCode).toBe(201)
+      expect((await book(app, 'consultation', '2026-11-09T08:00:00Z', 'Без ссылки')).statusCode).toBe(201)
+
+      const upcoming = await listUpcoming()
+
+      expect(upcoming.find((booking) => booking.guestName === 'Со ссылкой')).toMatchObject({
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+      })
+      expect(upcoming.find((booking) => booking.guestName === 'Без ссылки')).not.toHaveProperty('meetingUrl')
     })
 
     it('keeps a meeting until it ends and drops it afterwards', async () => {

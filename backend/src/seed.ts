@@ -12,6 +12,7 @@ export function seedDemoEventTypes(eventTypes: EventTypeRepository) {
     name: 'Ревью кода',
     description: 'Совместно разберём пулл-реквест и договоримся об улучшениях.',
     durationMinutes: 45,
+    meetingUrl: 'https://meet.google.com/abc-defg-hij',
   })
   eventTypes.insert({
     id: 'tech-interview',

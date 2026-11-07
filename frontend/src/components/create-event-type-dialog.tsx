@@ -21,10 +21,18 @@ import { cn } from '@/lib/utils'
 const DURATION_PRESETS = [15, 30, 45, 60]
 const DURATION_STEP_MINUTES = 5
 
-type Values = { name: string; id: string; durationMinutes: string; description: string }
+type Values = {
+  name: string
+  id: string
+  durationMinutes: string
+  description: string
+  meetingUrl: string
+}
 type Errors = Partial<Record<keyof Values, string>>
 
-const emptyValues: Values = { name: '', id: '', durationMinutes: '30', description: '' }
+const emptyValues: Values = { name: '', id: '', durationMinutes: '30', description: '', meetingUrl: '' }
+
+const MEETING_URL_PATTERN = /^https?:\/\/[^\s/?#:@][^\s/?#]*(?:[/?#][^\s]*)?$/
 
 function validate(values: Values): Errors {
   const errors: Errors = {}
@@ -42,6 +50,13 @@ function validate(values: Values): Errors {
   }
 
   if (values.description.length > 500) errors.description = 'Не длиннее 500 символов'
+
+  const meetingUrl = values.meetingUrl.trim()
+  if (meetingUrl.length > 2048) errors.meetingUrl = 'Не длиннее 2048 символов'
+  else if (meetingUrl && !MEETING_URL_PATTERN.test(meetingUrl)) {
+    errors.meetingUrl = 'Укажите ссылку http или https'
+  }
+
   return errors
 }
 
@@ -80,12 +95,15 @@ export function CreateEventTypeDialog({
       return
     }
 
+    const meetingUrl = values.meetingUrl.trim()
+
     createEventType.mutate(
       {
         id: values.id,
         name: values.name.trim(),
         description: values.description.trim(),
         durationMinutes: Number(values.durationMinutes),
+        ...(meetingUrl ? { meetingUrl } : {}),
       },
       {
         onSuccess: (created) => {
@@ -181,6 +199,22 @@ export function CreateEventTypeDialog({
                 </Button>
               ))}
             </div>
+          </FormField>
+
+          <FormField
+            id="et-meeting-url"
+            label="Ссылка на встречу"
+            hint="Google Meet или Zoom, необязательно"
+            error={errors.meetingUrl}
+          >
+            <Input
+              id="et-meeting-url"
+              inputMode="url"
+              placeholder="https://meet.google.com/…"
+              value={values.meetingUrl}
+              {...errorProps('et-meeting-url', errors.meetingUrl)}
+              onChange={(e) => update('meetingUrl', e.target.value)}
+            />
           </FormField>
 
           <FormField id="et-description" label="Описание" hint="Необязательно" error={errors.description}>

@@ -14,6 +14,7 @@ export const zBooking = z.object({
     guestName: z.string(),
     guestEmail: z.string(),
     comment: z.string().optional(),
+    meetingUrl: z.string().optional(),
     createdAt: z.iso.datetime({ offset: true })
 });
 
@@ -43,7 +44,8 @@ export const zEventType = z.object({
     id: z.string().min(2).max(64).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     name: z.string().min(1).max(100),
     description: z.string().max(500),
-    durationMinutes: z.int().gte(5).lte(240)
+    durationMinutes: z.int().gte(5).lte(240),
+    meetingUrl: z.string().max(2048).regex(/^https?:\/\/[^\s\/?#:@][^\s\/?#]*(?:[\/?#][^\s]*)?$/).optional()
 });
 
 /**

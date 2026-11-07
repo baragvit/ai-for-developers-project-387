@@ -17,6 +17,17 @@ describe('EventTypeService', () => {
     expect(service.list()).toEqual([quickSync])
   })
 
+  it('keeps an optional meeting link with the event type', () => {
+    const linked = { ...quickSync, id: 'linked', meetingUrl: 'https://meet.google.com/abc-defg-hij' }
+
+    expect(service.create(linked)).toEqual({ ok: true, value: linked })
+    expect(service.get('linked')).toEqual({ ok: true, value: linked })
+    expect(service.get('quick-sync')).toEqual({
+      ok: false,
+      error: { kind: 'EventTypeNotFound', eventTypeId: 'quick-sync' },
+    })
+  })
+
   it('refuses an id that is already taken and keeps the existing event type', () => {
     service.create(quickSync)
 

@@ -33,6 +33,27 @@ describe('booking conflicts', () => {
     expect(res.json()).toEqual({ code: 'SLOT_TAKEN', message: expect.any(String) })
   })
 
+  it('rejects a booking of an event type with a meeting URL for a taken slot', async () => {
+    const created = await injectChecked(app, {
+      method: 'POST',
+      url: '/api/admin/event-types',
+      payload: {
+        id: 'linked-call',
+        name: 'Звонок со ссылкой',
+        description: '',
+        durationMinutes: 30,
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+      },
+    })
+    expect(created.statusCode).toBe(201)
+    expect((await book(app, 'consultation', '2026-11-09T06:00:00Z')).statusCode).toBe(201)
+
+    const res = await book(app, 'linked-call', '2026-11-09T06:00:00Z')
+
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ code: 'SLOT_TAKEN', message: expect.any(String) })
+  })
+
   it('accepts a booking that starts exactly when another one ends', async () => {
     expect((await book(app, 'tech-interview', '2026-11-09T07:00:00Z')).statusCode).toBe(201)
 

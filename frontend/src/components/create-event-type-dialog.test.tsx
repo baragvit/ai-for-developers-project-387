@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { EventType } from '@/api/client'
-import { eventType, respond, wasRequested } from '@/test/api'
+import { eventType, requestBody, respond, wasRequested } from '@/test/api'
 import { renderApp } from '@/test/render'
 
 const created: EventType = {
@@ -43,12 +43,75 @@ describe('Диалог создания типа встречи', () => {
 
     expect(await screen.findByText('Тип встречи «Менторская сессия» создан')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(requestBody('POST', '/api/admin/event-types')).not.toHaveProperty('meetingUrl')
     await userEvent.click(screen.getByRole('tab', { name: /Типы встреч/ }))
     const cards = await screen.findAllByTestId('admin-event-type')
     expect(cards.map((card) => card.textContent)).toEqual([
       expect.stringContaining('Знакомство'),
       expect.stringContaining('Менторская сессия'),
     ])
+  })
+
+  it('создаёт тип встречи со ссылкой на онлайн-встречу', async () => {
+    const linked: EventType = {
+      id: 'linked-call',
+      name: 'Звонок со ссылкой',
+      description: '',
+      durationMinutes: 30,
+      meetingUrl: 'https://meet.google.com/abc-defg-hij',
+    }
+    const dialog = await openDialog()
+    await fill(dialog, {
+      Название: linked.name,
+      Идентификатор: linked.id,
+      'Ссылка на встречу': linked.meetingUrl!,
+    })
+
+    respond('POST', '/api/admin/event-types', linked, 201)
+    await userEvent.click(dialog.getByRole('button', { name: 'Создать' }))
+
+    expect(await screen.findByText('Тип встречи «Звонок со ссылкой» создан')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(requestBody('POST', '/api/admin/event-types')).toMatchObject({ meetingUrl: linked.meetingUrl })
+  })
+
+  it('обрезает пробелы вокруг ссылки на встречу перед проверкой и отправкой', async () => {
+    const linked: EventType = {
+      id: 'trimmed-call',
+      name: 'Звонок с пробелами',
+      description: '',
+      durationMinutes: 30,
+      meetingUrl: 'https://meet.google.com/abc-defg-hij',
+    }
+    const dialog = await openDialog()
+    await fill(dialog, {
+      Название: linked.name,
+      Идентификатор: linked.id,
+      'Ссылка на встречу': `  ${linked.meetingUrl} `,
+    })
+
+    respond('POST', '/api/admin/event-types', linked, 201)
+    await userEvent.click(dialog.getByRole('button', { name: 'Создать' }))
+
+    expect(await screen.findByText('Тип встречи «Звонок с пробелами» создан')).toBeInTheDocument()
+    expect(requestBody('POST', '/api/admin/event-types')).toMatchObject({ meetingUrl: linked.meetingUrl })
+  })
+
+  it.each([
+    ['без схемы', 'meet.google.com/abc-defg-hij'],
+    ['с недопустимой схемой', 'javascript:alert(1)'],
+    ['без хоста', 'https://'],
+    ['с пустым хостом и портом', 'https://:8080'],
+    ['с пробелом', 'https://meet.google.com/abc def'],
+  ])('показывает ошибку ссылки %s до отправки', async (_, meetingUrl) => {
+    const dialog = await openDialog()
+    await fill(dialog, { Название: 'Созвон', 'Ссылка на встречу': meetingUrl })
+    await userEvent.click(dialog.getByRole('button', { name: 'Создать' }))
+
+    expect(dialog.getByLabelText(/^Ссылка на встречу/)).toHaveAccessibleDescription(
+      'Укажите ссылку http или https',
+    )
+    expect(wasRequested('POST', '/api/admin/event-types')).toBe(false)
   })
 
   it('показывает ошибки у полей до отправки', async () => {
@@ -97,6 +160,28 @@ describe('Диалог создания типа встречи', () => {
 
     expect(await dialog.findByText('Должно быть кратно 5')).toBeInTheDocument()
     expect(dialog.getByLabelText('Длительность, минут')).toHaveAccessibleDescription('Должно быть кратно 5')
+  })
+
+  it('показывает серверную ошибку ссылки у поля «Ссылка на встречу»', async () => {
+    const dialog = await openDialog()
+    await fill(dialog, { Название: 'Созвон', 'Ссылка на встречу': 'https://meet.google.com/abc-defg-hij' })
+
+    respond(
+      'POST',
+      '/api/admin/event-types',
+      {
+        code: 'VALIDATION_ERROR',
+        message: 'Проверьте правильность заполнения полей',
+        details: [{ field: 'meetingUrl', message: 'Укажите ссылку http или https' }],
+      },
+      400,
+    )
+    await userEvent.click(dialog.getByRole('button', { name: 'Создать' }))
+
+    expect(await dialog.findByText('Укажите ссылку http или https')).toBeInTheDocument()
+    expect(dialog.getByLabelText(/^Ссылка на встречу/)).toHaveAccessibleDescription(
+      'Укажите ссылку http или https',
+    )
   })
 
   it('показывает занятый id у поля «Идентификатор» и не закрывается', async () => {

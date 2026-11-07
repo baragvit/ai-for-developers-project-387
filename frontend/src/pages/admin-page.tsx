@@ -175,6 +175,17 @@ function BookingList({ bookings }: { bookings: Booking[] }) {
                       <span className="break-words">{booking.comment}</span>
                     </p>
                   )}
+                  {booking.meetingUrl && (
+                    <a
+                      href={booking.meetingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex w-fit items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                    >
+                      <ExternalLink className="size-3.5" />
+                      Подключиться к встрече
+                    </a>
+                  )}
                 </div>
               </li>
             ))}

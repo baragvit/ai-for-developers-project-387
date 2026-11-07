@@ -27,6 +27,7 @@ export const toEventTypeDto = (eventType: EventType): EventTypeDto => ({
   name: eventType.name,
   description: eventType.description,
   durationMinutes: eventType.durationMinutes,
+  ...(eventType.meetingUrl ? { meetingUrl: eventType.meetingUrl } : {}),
 })
 
 export const fromEventTypeDto = (dto: EventTypeDto): EventType => ({
@@ -34,6 +35,7 @@ export const fromEventTypeDto = (dto: EventTypeDto): EventType => ({
   name: dto.name,
   description: dto.description,
   durationMinutes: dto.durationMinutes,
+  ...(dto.meetingUrl ? { meetingUrl: dto.meetingUrl } : {}),
 })
 
 export const toTimeSlotDto = (slot: Slot): TimeSlotDto => ({
@@ -50,7 +52,7 @@ export const fromCreateBookingRequestDto = (dto: CreateBookingRequestDto): NewBo
   comment: dto.comment || undefined,
 })
 
-export const toBookingDto = (booking: Booking): BookingDto => ({
+export const toBookingDto = (booking: Booking, meetingUrl?: string): BookingDto => ({
   id: booking.id,
   eventTypeId: booking.eventTypeId,
   eventTypeName: booking.eventTypeName,
@@ -59,6 +61,7 @@ export const toBookingDto = (booking: Booking): BookingDto => ({
   guestName: booking.guestName,
   guestEmail: booking.guestEmail,
   ...(booking.comment ? { comment: booking.comment } : {}),
+  ...(meetingUrl ? { meetingUrl } : {}),
   createdAt: booking.createdAt.toISOString(),
 })
 

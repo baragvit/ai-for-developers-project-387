@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import type { DomainError, Owner } from '../domain/model.js'
+import type { Booking, DomainError, Owner } from '../domain/model.js'
 import type { Result } from '../domain/result.js'
 import type { BookingService } from '../services/booking-service.js'
 import type { EventTypeService } from '../services/event-type-service.js'
@@ -46,6 +46,11 @@ function validationError(res: FastifyReply, details: BadRequestErrorDto['details
 export async function apiRoutes(app: FastifyInstance, deps: ApiDependencies) {
   const { owner, eventTypeService, bookingService } = deps
 
+  const toBookingWithMeetingUrl = (booking: Booking) => {
+    const eventType = eventTypeService.get(booking.eventTypeId)
+    return toBookingDto(booking, eventType.ok ? eventType.value.meetingUrl : undefined)
+  }
+
   app.get('/api/owner', async () => toOwnerDto(owner))
 
   app.get('/api/event-types', async () => eventTypeService.list().map(toEventTypeDto))
@@ -61,7 +66,12 @@ export async function apiRoutes(app: FastifyInstance, deps: ApiDependencies) {
   app.post('/api/bookings', async (req, res) => {
     const parsed = parseBody(createBookingRequestSchema, req.body)
     if (!parsed.success) return validationError(res, parsed.details)
-    return reply(res, bookingService.create(fromCreateBookingRequestDto(parsed.data)), toBookingDto, 201)
+    return reply(
+      res,
+      bookingService.create(fromCreateBookingRequestDto(parsed.data)),
+      toBookingWithMeetingUrl,
+      201,
+    )
   })
 
   app.post('/api/admin/event-types', async (req, res) => {
@@ -70,5 +80,5 @@ export async function apiRoutes(app: FastifyInstance, deps: ApiDependencies) {
     return reply(res, eventTypeService.create(fromEventTypeDto(parsed.data)), toEventTypeDto, 201)
   })
 
-  app.get('/api/admin/bookings', async () => bookingService.listUpcoming().map(toBookingDto))
+  app.get('/api/admin/bookings', async () => bookingService.listUpcoming().map(toBookingWithMeetingUrl))
 }
