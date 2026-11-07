@@ -81,6 +81,8 @@ jobs:
             e2e/playwright-report
             e2e/test-results
           if-no-files-found: warn
+          # A Re-run is a new attempt of the same run, where the SHA-named artifact already exists.
+          overwrite: true
 
   docker:
     runs-on: ubuntu-latest
