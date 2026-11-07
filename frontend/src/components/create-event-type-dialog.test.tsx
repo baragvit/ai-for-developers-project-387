@@ -75,6 +75,28 @@ describe('Диалог создания типа встречи', () => {
     expect(requestBody('POST', '/api/admin/event-types')).toMatchObject({ meetingUrl: linked.meetingUrl })
   })
 
+  it('обрезает пробелы вокруг ссылки на встречу перед проверкой и отправкой', async () => {
+    const linked: EventType = {
+      id: 'trimmed-call',
+      name: 'Звонок с пробелами',
+      description: '',
+      durationMinutes: 30,
+      meetingUrl: 'https://meet.google.com/abc-defg-hij',
+    }
+    const dialog = await openDialog()
+    await fill(dialog, {
+      Название: linked.name,
+      Идентификатор: linked.id,
+      'Ссылка на встречу': `  ${linked.meetingUrl} `,
+    })
+
+    respond('POST', '/api/admin/event-types', linked, 201)
+    await userEvent.click(dialog.getByRole('button', { name: 'Создать' }))
+
+    expect(await screen.findByText('Тип встречи «Звонок с пробелами» создан')).toBeInTheDocument()
+    expect(requestBody('POST', '/api/admin/event-types')).toMatchObject({ meetingUrl: linked.meetingUrl })
+  })
+
   it.each([
     ['без схемы', 'meet.google.com/abc-defg-hij'],
     ['с недопустимой схемой', 'javascript:alert(1)'],

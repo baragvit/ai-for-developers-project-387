@@ -51,8 +51,9 @@ function validate(values: Values): Errors {
 
   if (values.description.length > 500) errors.description = 'Не длиннее 500 символов'
 
-  if (values.meetingUrl.length > 2048) errors.meetingUrl = 'Не длиннее 2048 символов'
-  else if (values.meetingUrl && !MEETING_URL_PATTERN.test(values.meetingUrl)) {
+  const meetingUrl = values.meetingUrl.trim()
+  if (meetingUrl.length > 2048) errors.meetingUrl = 'Не длиннее 2048 символов'
+  else if (meetingUrl && !MEETING_URL_PATTERN.test(meetingUrl)) {
     errors.meetingUrl = 'Укажите ссылку http или https'
   }
 
@@ -94,13 +95,15 @@ export function CreateEventTypeDialog({
       return
     }
 
+    const meetingUrl = values.meetingUrl.trim()
+
     createEventType.mutate(
       {
         id: values.id,
         name: values.name.trim(),
         description: values.description.trim(),
         durationMinutes: Number(values.durationMinutes),
-        ...(values.meetingUrl ? { meetingUrl: values.meetingUrl } : {}),
+        ...(meetingUrl ? { meetingUrl } : {}),
       },
       {
         onSuccess: (created) => {
